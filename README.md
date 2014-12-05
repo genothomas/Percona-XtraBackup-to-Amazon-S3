@@ -1,5 +1,5 @@
-jogaco / Percona XtraBackup-to-Amazon-S3
-=========================================
+Percona XtraBackup-to-Amazon-S3
+===============================
 
 Based on https://github.com/woxxy/MySQL-backup-to-Amazon-S3
 
