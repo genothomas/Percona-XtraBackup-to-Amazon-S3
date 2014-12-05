@@ -1,67 +1,113 @@
-#!/bin/sh
+#!/bin/bash
 
-# Updates etc at: https://github.com/woxxy/MySQL-backup-to-Amazon-S3
-# Under a MIT license
-
+# Based on https://github.com/woxxy/MySQL-backup-to-Amazon-S3
+# Full backups every start of month and week. Differential backups the rest of days.
+# Param: auto | month | week | day
+# By default: auto
+#
 # change these variables to what you need
 MYSQLROOT=root
-MYSQLPASS=password
-S3BUCKET=bucketname
-FILENAME=filename
-DATABASE='--all-databases'
+MYSQLPASS=
+S3BUCKET=my_bucket
+#Path for full backup and differential backup. Must end with /
+BACKUP_PATH=/backups/
+# Name of backup dir, within BACKUP_PATH 
+BACKUP_DIRNAME=music_collect
 # the following line prefixes the backups with the defined directory. it must be blank or end with a /
-S3PATH=mysql_backup/
-# when running via cron, the PATHs MIGHT be different. If you have a custom/manual MYSQL install, you should set this manually like MYSQLDUMPPATH=/usr/local/mysql/bin/
-MYSQLDUMPPATH=
-#tmp path.
-TMP_PATH=~/
+S3PATH=
+# when running via cron, the PATHs MIGHT be different
+PERCONA_BACKUP_COMMAND=/usr/bin/innobackupex
 
-DATESTAMP=$(date +".%m.%d.%Y")
+#Week num, from 01 to 53 starting Monday
+week_curr=$(date +"%V")
+#Week num, from 01 to 53 starting Monday
+week_minus2=$(date --date="2 weeks ago" +"%V")
+#Week num, from 01 to 53 starting Monday
+month_curr=$(date +"%m")
+# Month minus 2 (1..12)
+month_minus2=$(date --date="2 months ago" +"%m")
+
+DATESTAMP=$(date +"_%Y%m%d_%H%M%S")
+# Day: 01-31
 DAY=$(date +"%d")
-DAYOFWEEK=$(date +"%A")
+# Day of week: Monday-Sunday
+DAYOFWEEK=$(date +"%u")
 
-PERIOD=${1-day}
+PERIOD=${1-auto}
+
 if [ ${PERIOD} = "auto" ]; then
 	if [ ${DAY} = "01" ]; then
-        	PERIOD=month
-	elif [ ${DAYOFWEEK} = "Sunday" ]; then
-        	PERIOD=week
+		PERIOD=month
+	elif [ ${DAYOFWEEK} = "1" ]; then
+		PERIOD=week
 	else
-       		PERIOD=day
+		PERIOD=day
 	fi	
 fi
 
-echo "Selected period: $PERIOD."
+if [ ${PERIOD} = "month" ]; then
+	CURRENT_MINUS2="month_${month_minus2}"
+	CURRENT="month_${month_curr}"
+elif [ ${PERIOD} = "week" ]; then
+	CURRENT_MINUS2="week_${week_minus2}"
+	CURRENT="week_${week_curr}"
+else
+	CURRENT="day_$(date +"%u")"
+fi
 
-echo "Starting backing up the database to a file..."
+echo "*************** Selected period: $PERIOD. Current: $CURRENT *************"
 
-# dump all databases
-${MYSQLDUMPPATH}mysqldump --quick --user=${MYSQLROOT} --password=${MYSQLPASS} ${DATABASE} > ${TMP_PATH}${FILENAME}.sql
+echo "*************** Starting backing up the database to a file... ***********"
 
-echo "Done backing up the database to a file."
-echo "Starting compression..."
+if [ ${PERIOD} = "week" ] || [ ${PERIOD} = "month" ] ; then
+	# Remove previous full-backup from local filesystem
+	BACKUP_DIRNAME=${BACKUP_DIRNAME}_full
+	rm -rf ${BACKUP_PATH}${BACKUP_DIRNAME}
+	# perform backup
+	${PERCONA_BACKUP_COMMAND} --user=${MYSQLROOT} --password=${MYSQLPASS} --no-timestamp ${BACKUP_PATH}${BACKUP_DIRNAME} --parallel=4 --use-memory=640M
+	# apply logs
+	${PERCONA_BACKUP_COMMAND} --user=${MYSQLROOT} --password=${MYSQLPASS} --no-timestamp ${BACKUP_PATH}${BACKUP_DIRNAME} --parallel=4 --use-memory=640M --apply-log
+else
+	# Remove previous differential-backup
+	echo "*************** Removing previous differential backup dir ***************"
+	rm -rf ${BACKUP_PATH}${BACKUP_DIRNAME}
+	# perform backup
+	${PERCONA_BACKUP_COMMAND} --user=${MYSQLROOT} --password=${MYSQLPASS} --no-timestamp --incremental ${BACKUP_PATH}${BACKUP_DIRNAME} --incremental-basedir=${BACKUP_PATH}${BACKUP_DIRNAME}_full --parallel=4 --use-memory=640M
+	# apply logs
+	${PERCONA_BACKUP_COMMAND} --user=${MYSQLROOT} --password=${MYSQLPASS} --no-timestamp --incremental ${BACKUP_PATH}${BACKUP_DIRNAME} --incremental-basedir=${BACKUP_PATH}${BACKUP_DIRNAME}_full --parallel=4 --use-memory=640M --apply-log
+fi
 
-tar czf ${TMP_PATH}${FILENAME}${DATESTAMP}.tar.gz ${TMP_PATH}${FILENAME}.sql
+echo "*************** Done backing up the database to a file. *****************"
+echo "*************** Starting compression... *********************************"
 
-echo "Done compressing the backup file."
+echo "tar czf ${BACKUP_PATH}${BACKUP_DIRNAME}${DATESTAMP}.tar.gz -C ${BACKUP_PATH} ${BACKUP_DIRNAME}" 
 
-# we want at least two backups, two months, two weeks, and two days
-echo "Removing old backup (2 ${PERIOD}s ago)..."
-s3cmd del --recursive s3://${S3BUCKET}/${S3PATH}previous_${PERIOD}/
-echo "Old backup removed."
+tar czf ${BACKUP_PATH}${BACKUP_DIRNAME}${DATESTAMP}.tar.gz -C ${BACKUP_PATH} ${BACKUP_DIRNAME}
 
-echo "Moving the backup from past $PERIOD to another folder..."
-s3cmd mv --recursive s3://${S3BUCKET}/${S3PATH}${PERIOD}/ s3://${S3BUCKET}/${S3PATH}previous_${PERIOD}/
-echo "Past backup moved."
+echo "*************** Done compressing the backup file. ***********************"
 
 # upload all databases
-echo "Uploading the new backup..."
-s3cmd put -f ${TMP_PATH}${FILENAME}${DATESTAMP}.tar.gz s3://${S3BUCKET}/${S3PATH}${PERIOD}/
-echo "New backup uploaded."
+echo "*************** Uploading the new backup... *****************************"
+s3cmd put -f ${BACKUP_PATH}${BACKUP_DIRNAME}${DATESTAMP}.tar.gz s3://${S3BUCKET}/${S3PATH}${CURRENT}/
+echo "*************** New backup uploaded. ************************************"
 
-echo "Removing the cache files..."
-# remove databases dump
-rm ${TMP_PATH}${FILENAME}.sql
-rm ${TMP_PATH}${FILENAME}${DATESTAMP}.tar.gz
-echo "Files removed."
+# Remove old backups from 2 periods ago, if period is month or week, plus daily differential backups
+if [ ${PERIOD} = "week" ] || [ ${PERIOD} = "month" ] ; then
+	echo "Removing old backup (2 ${PERIOD}s ago)..."
+	s3cmd del --recursive s3://${S3BUCKET}/${S3PATH}${CURRENT_MINUS2}/
+	echo "Old backup removed."
+	echo "Removing daily differential backups..."
+	week_days=(day_1 day_2 day_3 day_4 day_5 day_6 day_7)
+	for i in "${week_days[@]}"
+	do
+		echo "Removing $i"
+		s3cmd del --recursive s3://${S3BUCKET}/${S3PATH}${i}/
+	done
+fi
+
+echo "*************** Removing the cache files... *****************************"
+# remove compressed databases dump
+rm ${BACKUP_PATH}${BACKUP_DIRNAME}${DATESTAMP}.tar.gz
+echo "*************** Cache files removed. ************************************"
 echo "All done."
+
