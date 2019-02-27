@@ -88,7 +88,7 @@ echo "*************** Done compressing the backup file. ***********************"
 
 # upload all databases
 echo "*************** Uploading the new backup... *****************************"
-s3cmd put -f ${BACKUP_PATH}${BACKUP_DIRNAME}${DATESTAMP}.tar.gz s3://${S3BUCKET}/${S3PATH}${CURRENT}/
+s3cmd put --acl-private -f ${BACKUP_PATH}${BACKUP_DIRNAME}${DATESTAMP}.tar.gz s3://${S3BUCKET}/${S3PATH}${CURRENT}/
 echo "*************** New backup uploaded. ************************************"
 
 # Remove old backups from 2 periods ago, if period is month or week, plus daily differential backups
