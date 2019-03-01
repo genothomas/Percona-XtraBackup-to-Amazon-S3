@@ -34,8 +34,8 @@ fi
 
 echo "*************** Selected period: $PERIOD. Current: $CURRENT *************\n"
 
-#echo "*************** Downloading full backup for ${PERIOD}_${CURRENT} *********************"
-#s3cmd get --force s3://${S3BUCKET}/${S3PATH}${PERIOD}_${CURRENT}/*.tar.gz ${RESTORED_DIR}/
+echo "*************** Downloading full backup for ${PERIOD}_${CURRENT} *********************"
+s3cmd get --force s3://${S3BUCKET}/${S3PATH}${PERIOD}_${CURRENT}/*.tar.gz ${RESTORED_DIR}/
 
 echo "*************** Downloading last differential backup for day_${day_of_the_week}"
 s3cmd get --force s3://${S3BUCKET}/${S3PATH}day_${day_of_the_week}/*.tar.gz ${RESTORED_DIR}/
