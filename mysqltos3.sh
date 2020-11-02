@@ -9,6 +9,7 @@ set -e #stops execution if a variable is not set
 set -u #stop execution if something goes wrong
 
 # check binaries
+which pigz > /dev/null
 which s3cmd > /dev/null
 which qpress > /dev/null
 which innobackupex > /dev/null
@@ -89,14 +90,14 @@ else
 fi
 
 # archiving all databases to a file
-echo "*************** Started archiving the databases to a file... ***********"
-echo "tar -cf ${BACKUP_PATH}${BACKUP_DIRNAME}${DATESTAMP}.tar -C ${BACKUP_PATH} ${BACKUP_DIRNAME}"
-tar -cf ${BACKUP_PATH}${BACKUP_DIRNAME}${DATESTAMP}.tar -C ${BACKUP_PATH} ${BACKUP_DIRNAME}
+echo "*************** Started archiving the databases to a file... ************"
+echo "tar -I pigz -cf ${BACKUP_PATH}${BACKUP_DIRNAME}${DATESTAMP}.tar.gz -C ${BACKUP_PATH} ${BACKUP_DIRNAME}"
+tar -I pigz -cf ${BACKUP_PATH}${BACKUP_DIRNAME}${DATESTAMP}.tar.gz -C ${BACKUP_PATH} ${BACKUP_DIRNAME}
 echo "*************** Done archiving the databases. ***************************"
 
 # upload all databases
 echo "*************** Uploading the new backup... *****************************"
-s3cmd put --acl-private -f ${BACKUP_PATH}${BACKUP_DIRNAME}${DATESTAMP}.tar s3://${S3BUCKET}/${S3PATH}${CURRENT}/
+s3cmd put --acl-private -f ${BACKUP_PATH}${BACKUP_DIRNAME}${DATESTAMP}.tar.gz s3://${S3BUCKET}/${S3PATH}${CURRENT}/
 echo "*************** New backup uploaded. ************************************"
 
 # remove old backups from 2 periods ago, if period is month or week, plus daily differential backups
@@ -115,7 +116,6 @@ fi
 
 echo "*************** Removing the cache files... *****************************"
 # remove archived databases dump
-rm ${BACKUP_PATH}${BACKUP_DIRNAME}${DATESTAMP}.tar
+rm ${BACKUP_PATH}${BACKUP_DIRNAME}${DATESTAMP}.tar.gz
 echo "*************** Cache files removed. ************************************"
 echo "All done."
-
