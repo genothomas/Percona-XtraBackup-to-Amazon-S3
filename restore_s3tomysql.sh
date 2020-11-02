@@ -4,6 +4,7 @@ set -e #stops execution if a variable is not set
 set -u #stop execution if something goes wrong
 
 # check binaries
+which pigz > /dev/null
 which s3cmd > /dev/null
 which qpress > /dev/null
 which xtrabackup > /dev/null
@@ -51,16 +52,16 @@ fi
 echo -e "*************** Selected period: $PERIOD. Current: $CURRENT **********************\n"
 
 echo -e "*************** Downloading full backup for ${PERIOD}_${CURRENT} *********************"
-s3cmd get --force s3://${S3BUCKET}/${S3PATH}${PERIOD}_${CURRENT}/*.tar ${RESTORED_DIR}/
+s3cmd get --force s3://${S3BUCKET}/${S3PATH}${PERIOD}_${CURRENT}/*.tar.gz ${RESTORED_DIR}/
 
 echo -e "*************** Downloading last differential backup for day_${day_of_the_week}"
-s3cmd get --force s3://${S3BUCKET}/${S3PATH}day_${day_of_the_week}/*.tar ${RESTORED_DIR}/
+s3cmd get --force s3://${S3BUCKET}/${S3PATH}day_${day_of_the_week}/*.tar.gz ${RESTORED_DIR}/
 
 echo -e "*************** Decompressing backups ***********************************\n"
-for file in `ls ${RESTORED_DIR}/*.tar` ;
+for file in `ls ${RESTORED_DIR}/*.tar.gz` ;
 do
   echo -e "*************** Decompressing $file to $RESTORED_DIR\n"
-  tar -xvf $file --directory ${RESTORED_DIR}
+  tar -I pigz -xivf $file --directory ${RESTORED_DIR}
 done
 
 # differential backups will be placed in $RESTORED_DIR/$BACKUP_DIRNAME
@@ -74,14 +75,14 @@ ${PERCONA_BACKUP_COMMAND} --decompress --parallel=$(nproc --all) --remove-origin
 if [ -d "${RESTORED_DIFF_DIR}" ] && [ -d "${RESTORED_FULL_DIR}" ] ;
 then
   echo -e "*************** Merging differential and full backups ********************\n"
-  ${PERCONA_BACKUP_COMMAND} --prepare --apply-log-only ${ARGS} --target-dir=${RESTORED_FULL_DIR}
-  ${PERCONA_BACKUP_COMMAND} --prepare ${ARGS} --target-dir=${RESTORED_FULL_DIR} --incremental-dir=${RESTORED_DIFF_DIR}
+  ${PERCONA_BACKUP_COMMAND} --defaults-file=${RESTORED_FULL_DIR}/backup-my.cnf --prepare --apply-log-only ${ARGS} --target-dir=${RESTORED_FULL_DIR}
+  ${PERCONA_BACKUP_COMMAND} --defaults-file=${RESTORED_FULL_DIR}/backup-my.cnf --prepare ${ARGS} --target-dir=${RESTORED_FULL_DIR} --incremental-dir=${RESTORED_DIFF_DIR}
   echo -e "\n${green_color}[NOTICE] Merged backups available in: ${RESTORED_FULL_DIR} ${reset_color}"
   echo -e "\n${green_color}${PERIOD}_${CURRENT} checkpoints info ${reset_color}\n"
   cat ${RESTORED_FULL_DIR}/xtrabackup_checkpoints
   echo -e "\n*************** Removing the cache files... ******************************"
   # remove compressed databases dump
-  rm -rf ${RESTORED_DIR}/*.tar
+  rm -rf ${RESTORED_DIR}/*.tar.gz
   echo -e "*************** Cache files removed. *************************************\n"
   echo "All done."
 else
@@ -89,4 +90,3 @@ else
   echo "Please check directory: ${RESTORED_DIR}"
   exit 1
 fi
-
