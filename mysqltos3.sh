@@ -12,7 +12,7 @@ set -u #stop execution if something goes wrong
 which pigz > /dev/null
 which s3cmd > /dev/null
 which qpress > /dev/null
-which innobackupex > /dev/null
+which xtrabackup > /dev/null
 
 # change these variables to what you need
 MYSQLROOT="root"
@@ -29,9 +29,9 @@ BACKUP_DIRNAME="backup_mysql"
 # the following line prefixes the backups with the defined directory. it must be blank or end with a /
 S3PATH="hawk/"
 # when running via cron, the PATHs MIGHT be different
-PERCONA_BACKUP_COMMAND="/usr/bin/innobackupex"
+PERCONA_BACKUP_COMMAND="/usr/bin/xtrabackup"
 # extras
-ARGS="--parallel=$(nproc --all) --compress --compress-threads=$(nproc --all) --no-version-check --no-timestamp --extra-lsndir=/tmp --history --slave-info --rsync"
+ARGS="--parallel=$(nproc --all) --compress --compress-threads=$(nproc --all) --no-version-check --extra-lsndir=/tmp --history --slave-info --rsync"
 
 # Week num, from 01 to 53 starting Monday
 week_curr=$(date +"%V")
@@ -53,7 +53,7 @@ PERIOD=${1-auto}
 if [ ${PERIOD} = "auto" ]; then
         if [ ${DAY} = "01" ]; then
                 PERIOD=month
-        elif [ ${DAYOFWEEK} = "1" ]; then
+        elif [ ${DAYOFWEEK} = "7" ]; then
                 PERIOD=week
         else
                 PERIOD=day
@@ -80,13 +80,13 @@ if [ ${PERIOD} = "week" ] || [ ${PERIOD} = "month" ] ; then
         BACKUP_DIRNAME=${BACKUP_DIRNAME}_full
         rm -rf ${BACKUP_PATH}${BACKUP_DIRNAME}
         # perform backup
-        ${PERCONA_BACKUP_COMMAND} --defaults-file=${MYCNF} --host=${HOST} --port=${PORT} --user=${MYSQLROOT} --password=${MYSQLPASS} --socket=${SOCKET} ${ARGS} ${BACKUP_PATH}${BACKUP_DIRNAME}
+        ${PERCONA_BACKUP_COMMAND} --defaults-file=${MYCNF} --backup --host=${HOST} --port=${PORT} --user=${MYSQLROOT} --password=${MYSQLPASS} --socket=${SOCKET} ${ARGS} --target-dir=${BACKUP_PATH}${BACKUP_DIRNAME}
 else
         # Remove previous differential-backup
         echo "*************** Removing previous differential backup dir ***************"
         rm -rf ${BACKUP_PATH}${BACKUP_DIRNAME}
         # perform backup
-        ${PERCONA_BACKUP_COMMAND} --defaults-file=${MYCNF} --host=${HOST} --port=${PORT} --user=${MYSQLROOT} --password=${MYSQLPASS} --socket=${SOCKET} ${ARGS} --incremental ${BACKUP_PATH}${BACKUP_DIRNAME} --incremental-basedir=${BACKUP_PATH}${BACKUP_DIRNAME}_full
+        ${PERCONA_BACKUP_COMMAND} --defaults-file=${MYCNF} --backup --host=${HOST} --port=${PORT} --user=${MYSQLROOT} --password=${MYSQLPASS} --socket=${SOCKET} ${ARGS} --incremental --target-dir=${BACKUP_PATH}${BACKUP_DIRNAME} --incremental-basedir=${BACKUP_PATH}${BACKUP_DIRNAME}_full
 fi
 
 # archiving all databases to a file
